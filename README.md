@@ -1,8 +1,8 @@
 # comfylogin
 
-**Bugs, questions and screenshots: [join our Discord](https://discord.gg/YSWzYk8xP).**
-
-[![Discord](https://img.shields.io/badge/Discord-ComfyCraft-5865F2?logo=discord&logoColor=white&style=for-the-badge)](https://discord.gg/YSWzYk8xP)
+> **Bugs, questions and screenshots: [join our Discord](https://discord.gg/YSWzYk8xP).**
+>
+> [![Discord](https://img.shields.io/badge/Discord-ComfyCraft-5865F2?logo=discord&logoColor=white&style=for-the-badge)](https://discord.gg/YSWzYk8xP)
 
 Saved accounts on the login screen, and your characters in the order you want. A patch for 1.12 or 1.18 clients.
 
