@@ -1,24 +1,32 @@
 # comfylogin: development notes
 
-The facts here were measured on 2026-09-25 in two 1.12 clients: an OctoWoW build and a Turtle build. The code is `ComfyLogin.xml` and `ComfyLogin.lua`. The build is `node build.js`, which writes `patch-W.mpq` at the repo root.
+The facts here were measured on 2026-09-25 in two 1.12 clients: an OctoWoW build and a Turtle build. The code is `ComfyLoginPanel.xml` and `ComfyLogin.lua`. The build is `node build.js`, which writes `patch-W.mpq` at the repo root.
 
 ## How the files load
 
-A patch cannot add a glue file on its own. The client loads only the files that `Interface\GlueXML\GlueXML.toc` names. Replacing the toc is not safe: the two clients have different tocs, and paokkerkir's autologin replaces the toc and drops OctoWoW's six locale files with it.
+A patch cannot add a glue file on its own. The client loads only the files that `Interface\GlueXML\GlueXML.toc` names. Replacing the toc is not safe: the clients have different tocs. paokkerkir's autologin replaces the toc and drops OctoWoW's six locale files with it.
 
-So ComfyCraft's `patch-V` has this line at the end of its `CharacterCreate.xml`:
+So comfylogin rides in a file the toc already names. `patch-W` ships its own copy of `MovieFrame.xml`, the intro cinematic frame, with one line added at the end:
 
 ```xml
-<Include file="ComfyLogin.xml"/>
+<Include file="ComfyLoginPanel.xml"/>
 ```
 
-`ComfyLogin.xml` loads `ComfyLogin.lua` with a `<Script>` line. When the file is not there, the client writes one line to `Logs\GlueXML.log` and loads the rest of the screen:
+`ComfyLoginPanel.xml` loads `ComfyLogin.lua` with a `<Script>` line.
 
-```
-Couldn't open Interface\GlueXML\ComfyLogin.xml
-```
+**Why `MovieFrame.xml`.** A host file must meet three rules:
 
-`CharacterCreate.xml` loads after `AccountLogin.xml` and `CharacterSelect.xml`. So every function that comfylogin wraps exists when `ComfyAccounts_OnLoad` runs.
+1. It loads after `AccountLogin.xml` and `CharacterSelect.xml`, so every function that comfylogin wraps exists when `ComfyAccounts_OnLoad` runs.
+2. No other pack ships it. `W` sorts after every numbered and lettered patch below it, so our copy replaces theirs. A host that `patch-V` or Turtle edits would lose those edits.
+3. It is the same bytes in every client, so one copy fits all of them.
+
+In `octow`, `octow - Copy` and `clean-turtle`, three files meet all three: `PatchDownload.xml`, `MovieFrame.xml` and `CreditsFrame.xml`. Each comes from Blizzard's 1.12.1 `patch.MPQ`, and Turtle has not changed them. `MovieFrame.xml` is the smallest, 1,448 bytes, so our copy pins the least. `build.js` packs `src/MovieFrame.xml`, which is Blizzard's file plus the Include line. Checked: our copy without that line is byte for byte the stock file.
+
+The cost: if a pack ever ships its own `MovieFrame.xml`, ours hides it.
+
+**The old hook.** comfylogin first loaded through ComfyCraft's `patch-V`, which has `<Include file="ComfyLogin.xml"/>` at the end of its `CharacterCreate.xml`. That line is in clients now. With the panel still under that name, such a client would load it twice. So `patch-W` also ships a `ComfyLogin.xml` that is an empty `<Ui>`: the old line loads nothing, and it no longer writes `Couldn't open Interface\GlueXML\ComfyLogin.xml` to `Logs\GlueXML.log`.
+
+Measured in `octow - Copy` on 2026-09-25: with `patch-V`, the panel shows once and `GlueXML.log` is not written. With `patch-V` moved out, the panel shows on Turtle's own login screen and `GlueXML.log` is not written. The log is written only when something fails.
 
 Letter W is not used by any pack that the ComfyCraft launcher lists, or by either test client.
 
@@ -48,4 +56,4 @@ The order is kept by character name. paokkerkir's matched by number, which goes 
 
 ## Other autologin patches
 
-comfylogin does nothing when `LoginManager` (paokkerkir's) or `Autologin_Table` (the older Haaxor-style patch) is defined. Their files load after `CharacterCreate.xml`, so each wrap tests this at every call and not once at load.
+comfylogin does nothing when `LoginManager` (paokkerkir's) or `Autologin_Table` (the older Haaxor-style patch) is defined. The older patch replaces `AccountLogin.xml` and `CharacterSelect.xml`, and paokkerkir's adds a toc line after `MovieFrame.xml`. So each wrap tests this at every call and not once at load.

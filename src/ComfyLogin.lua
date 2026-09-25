@@ -1,6 +1,6 @@
 -- comfylogin: saved accounts on the login screen, and the order of the
 -- characters on character select, with an auto login character. The frames
--- are ComfyLogin.xml, which loads this file. Written after
+-- are ComfyLoginPanel.xml, which loads this file. Written after
 -- paokkerkir/vanilla-autologin (itself after Haaxor1689/vanilla-autologin and
 -- Otari98/Reorder-Patch), whose file it reads and writes, so accounts saved
 -- with it carry over.
@@ -264,7 +264,7 @@ function ComfyAccounts_Select(index)
 		usable = string.len(stored) > 1;
 	end
 	-- With no password to send, typing one is the next step. Otherwise the
-	-- focus goes to ComfyAccountsSink (ComfyLogin.xml has why).
+	-- focus goes to ComfyAccountsSink (ComfyLoginPanel.xml has why).
 	if ( usable ) then
 		ComfyAccountsSink:SetFocus();
 	else

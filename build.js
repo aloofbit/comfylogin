@@ -3,13 +3,15 @@
  *
  *   node build.js [-o <out.mpq>]
  *
- * Two files go in, both under Interface\GlueXML:
+ * Four files go in, all under Interface\GlueXML:
  *
- *   ComfyLogin.xml   the frames, and a <Script> line that loads the Lua
- *   ComfyLogin.lua   the code
+ *   MovieFrame.xml        Blizzard's own, from the 1.12.1 patch.MPQ, with one
+ *                         Include line added at the end. This is what loads us
+ *   ComfyLoginPanel.xml   the frames, and a <Script> line that loads the Lua
+ *   ComfyLogin.lua        the code
+ *   ComfyLogin.xml        empty, for the Include line in older patch-V copies
  *
- * Nothing in the client loads ComfyLogin.xml by itself. ComfyCraft's patch-V
- * includes it at the end of its CharacterCreate.xml. src/README.md has why.
+ * src/README.md has why.
  *
  * tools/pack.js writes the archive and reads every file back before it exits.
  */
@@ -26,7 +28,7 @@ const out = path.resolve(i < 0 ? path.join(__dirname, 'patch-W.mpq') : args[i + 
 // endings, the way Blizzard's own are.
 const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'comfylogin-'));
 const packArgs = [path.join(__dirname, 'tools', 'pack.js'), out];
-for (const name of ['ComfyLogin.xml', 'ComfyLogin.lua']) {
+for (const name of ['MovieFrame.xml', 'ComfyLoginPanel.xml', 'ComfyLogin.lua', 'ComfyLogin.xml']) {
     const text = fs.readFileSync(path.join(__dirname, 'src', name), 'latin1').replace(/\r\n/g, '\n');
     const local = path.join(stage, name);
     fs.writeFileSync(local, Buffer.from(text.split('\n').join('\r\n'), 'latin1'));
