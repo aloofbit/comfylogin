@@ -6,6 +6,8 @@
 
 Saved accounts on the login screen, and your characters in the order you want. A patch for 1.12 or 1.18 clients.
 
+![The saved accounts list on the login screen: three accounts, each with a character name below it. The hovered row glows and shows its x.](media/saved-accounts.png)
+
 ## Features
 
 - **Saved accounts.** Your accounts are listed on the login screen. Click one to fill in the name and password. Double click to log in.
