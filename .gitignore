@@ -1,2 +1,5 @@
 patch-W.mpq
 *.zip
+build/
+comfylogin.dll
+comfylogin.log

@@ -5,11 +5,13 @@
 -- Otari98/Reorder-Patch), whose file it reads and writes, so accounts saved
 -- with it carry over.
 --
--- THE LIST NEEDS NAMPOWER. It lives in Imports\logins.txt, through Nampower's
--- ImportFile and ExportFile. The only glue storage without a DLL is the saved
--- account name in Config.wtf, and the client reads each Config.wtf line into
--- 127 bytes, which leaves about 109 characters (measured 2026-09-25). Without
--- Nampower the panel stays hidden and the login screen is stock.
+-- THE LIST NEEDS A DLL. comfylogin.dll keeps it in WTF\comfylogin.txt, through
+-- ComfyLoginRead and ComfyLoginWrite, and encrypts each password with DPAPI.
+-- Without it, Nampower's ImportFile and ExportFile keep it in
+-- Imports\logins.txt. The only glue storage with neither is the saved account
+-- name in Config.wtf, and the client reads each Config.wtf line into 127
+-- bytes, which leaves about 109 characters (measured 2026-09-25). With no DLL
+-- the panel stays hidden and the login screen is stock.
 --
 -- IT STANDS DOWN FOR ANOTHER AUTOLOGIN. paokkerkir's defines LoginManager and
 -- the older one defines Autologin_Table. Both wrap the same functions, and
@@ -21,8 +23,13 @@ local COMFY_ACC_ROW = 40;
 local COMFY_ACC_GAP = 12;
 local ComfyAccData;
 
+-- comfylogin.dll's functions, or else Nampower's.
+local function ComfyAccStore()
+	return ComfyLoginRead ~= nil or ( ImportFile ~= nil and ExportFile ~= nil );
+end
+
 local function ComfyAccOff()
-	return not ( ImportFile and ExportFile ) or LoginManager ~= nil or Autologin_Table ~= nil;
+	return not ComfyAccStore() or LoginManager ~= nil or Autologin_Table ~= nil;
 end
 
 -- The same shape paokkerkir's writes: a Lua table, read back with loadstring.
@@ -51,11 +58,21 @@ end
 
 -- A file that does not parse is never written over: the list stays empty for
 -- this session and the file stays as it was.
+-- comfylogin.dll answers false for a file that is there but cannot be read.
 local function ComfyAccLoad()
 	ComfyAccData = { accounts = {} };
 	ComfyAcc.broken = nil;
-	local ok, text = pcall(ImportFile, "logins");
-	if ( not ok or type(text) ~= "string" or text == "" ) then
+	local ok, text;
+	if ( ComfyLoginRead ) then
+		ok, text = pcall(ComfyLoginRead);
+	else
+		ok, text = pcall(ImportFile, "logins");
+	end
+	if ( not ok or text == false ) then
+		ComfyAcc.broken = true;
+		return;
+	end
+	if ( type(text) ~= "string" or text == "" ) then
 		return;
 	end
 	local chunk = loadstring("return " .. text);
@@ -80,7 +97,35 @@ local function ComfyAccSave()
 	if ( ComfyAcc.broken or not ComfyAccData ) then
 		return;
 	end
-	pcall(ExportFile, "logins", ComfyAccSerialize(ComfyAccData, ""));
+	local text = ComfyAccSerialize(ComfyAccData, "");
+	if ( ComfyLoginWrite ) then
+		pcall(ComfyLoginWrite, text);
+	else
+		pcall(ExportFile, "logins", text);
+	end
+end
+
+-- With comfylogin.dll, a password kept as text (a ":" and the password, from
+-- an older comfylogin or from paokkerkir's autologin) is encrypted at load.
+local function ComfyAccEncryptAll()
+	if ( not ComfyLoginEncrypt or ComfyAcc.broken ) then
+		return;
+	end
+	local changed;
+	for _, acct in ipairs(ComfyAccData.accounts) do
+		local stored = acct.password;
+		if ( type(stored) == "string" and string.len(stored) > 1 and string.sub(stored, 1, 1) == ":"
+				and not string.find(stored, "^:comfy:") and not string.find(stored, "^:encrypted:") ) then
+			local ok, encrypted = pcall(ComfyLoginEncrypt, string.sub(stored, 2));
+			if ( ok and encrypted ) then
+				acct.password = encrypted;
+				changed = true;
+			end
+		end
+	end
+	if ( changed ) then
+		ComfyAccSave();
+	end
 end
 
 local function ComfyAccFind(name)
@@ -114,6 +159,20 @@ local function ComfyAccAuto(acct, realm)
 	end
 end
 
+-- The stock 1.12.1 login screen has no CLASS_COLORS, which Turtle's has. These
+-- are 1.12.1's RAID_CLASS_COLORS, by the English class name the client gives.
+local COMFY_CLASS_COLORS = {
+	["Druid"] = "|cffff7d0a",
+	["Hunter"] = "|cffabd473",
+	["Mage"] = "|cff69ccf0",
+	["Paladin"] = "|cfff58cba",
+	["Priest"] = "|cffffffff",
+	["Rogue"] = "|cfffff569",
+	["Shaman"] = "|cfff58cba",
+	["Warlock"] = "|cff9482c9",
+	["Warrior"] = "|cffc79c6e",
+};
+
 -- The character line under an account, in its class colour: the auto login
 -- character on this realm, or else the last one played.
 local function ComfyAccCharText(acct)
@@ -128,6 +187,9 @@ local function ComfyAccCharText(acct)
 	end
 	local token = TW_CLASS_TOKEN and class and TW_CLASS_TOKEN[class];
 	local color = token and CLASS_COLORS and CLASS_COLORS[token];
+	if ( not CLASS_COLORS and class ) then
+		color = COMFY_CLASS_COLORS[class];
+	end
 	if ( type(color) == "string" ) then
 		return color .. name .. "|r";
 	end
@@ -141,7 +203,7 @@ local COMFY_ACC_GLOW = 0.35;
 -- One row glows: the hovered one, or with nothing hovered, the selected one.
 -- The owner's call, 2026-09-25.
 local function ComfyAccGlow(row)
-	local glow = _G[row:GetName() .. "Glow"];
+	local glow = getglobal(row:GetName() .. "Glow");
 	local lit;
 	if ( ComfyAcc.hover ) then
 		lit = ComfyAcc.hover == row;
@@ -155,7 +217,7 @@ local function ComfyAccGlow(row)
 		glow:Hide();
 	end
 	-- The x shows on the hovered row only (the owner's call, 2026-09-25).
-	local remove = _G[row:GetName() .. "Remove"];
+	local remove = getglobal(row:GetName() .. "Remove");
 	if ( ComfyAcc.hover == row ) then
 		remove:Show();
 	else
@@ -165,7 +227,7 @@ end
 
 local function ComfyAccGlowAll()
 	for i = 1, COMFY_ACC_PAGE do
-		ComfyAccGlow(_G["ComfyAccountsRow" .. i]);
+		ComfyAccGlow(getglobal("ComfyAccountsRow" .. i));
 	end
 end
 
@@ -202,12 +264,12 @@ function ComfyAccounts_Update()
 	local first = ComfyAcc.page * COMFY_ACC_PAGE;
 	local shown = 0;
 	for i = 1, COMFY_ACC_PAGE do
-		local row = _G["ComfyAccountsRow" .. i];
+		local row = getglobal("ComfyAccountsRow" .. i);
 		local acct = list[first + i];
 		if ( acct ) then
 			row.index = first + i;
-			_G[row:GetName() .. "Name"]:SetText(acct.account);
-			_G[row:GetName() .. "Char"]:SetText(ComfyAccCharText(acct));
+			getglobal(row:GetName() .. "Name"):SetText(acct.account);
+			getglobal(row:GetName() .. "Char"):SetText(ComfyAccCharText(acct));
 			ComfyAccGlow(row);
 			row:Show();
 			shown = shown + 1;
@@ -245,8 +307,12 @@ end
 -- before Login; a double click logs in (the owner's call, 2026-09-25). The
 -- boxes lose focus, so a stray key lands in neither, unless there is no
 -- password to send, when the password box takes it.
--- A password Nampower encrypted is not shown: the box stays empty, and the
--- Login wrap sends the stored one for an empty box.
+-- An encrypted password never reaches Lua. The box gets COMFY_ACC_SAVED
+-- instead, which it shows as asterisks like any password, and the Login wrap
+-- sends the stored password for it. One that does not decrypt here (it was
+-- saved on another PC or by another Windows user) counts as no password.
+local COMFY_ACC_SAVED = "~comfy~saved~";
+
 function ComfyAccounts_Select(index)
 	local acct = index and ComfyAccData.accounts[index];
 	if ( not acct ) then
@@ -254,11 +320,15 @@ function ComfyAccounts_Select(index)
 	end
 	ComfyAcc.selected = index;
 	local stored = acct.password or "";
+	ComfyAcc.savedFor = acct.account;
 	AccountLoginAccountEdit:SetText(acct.account);
 	local usable;
-	if ( string.find(stored, "^:encrypted:") ) then
-		AccountLoginPasswordEdit:SetText("");
+	if ( string.find(stored, "^:comfy:") ) then
+		usable = ComfyLoginCanDecrypt ~= nil and ComfyLoginCanDecrypt(stored);
+		AccountLoginPasswordEdit:SetText(usable and COMFY_ACC_SAVED or "");
+	elseif ( string.find(stored, "^:encrypted:") ) then
 		usable = EncryptedServerLogin ~= nil;
+		AccountLoginPasswordEdit:SetText(usable and COMFY_ACC_SAVED or "");
 	else
 		AccountLoginPasswordEdit:SetText(string.sub(stored, 2));
 		usable = string.len(stored) > 1;
@@ -314,7 +384,12 @@ local function ComfyAccCommit()
 	if ( pending ) then
 		local i = ComfyAccFind(pending.account);
 		local stored = pending.password;
-		if ( ComfyAccData.encrypt_passwords and EncryptPassword ) then
+		if ( ComfyLoginEncrypt ) then
+			local ok, encrypted = pcall(ComfyLoginEncrypt, string.sub(stored, 2));
+			if ( ok and encrypted ) then
+				stored = encrypted;
+			end
+		elseif ( ComfyAccData.encrypt_passwords and EncryptPassword ) then
 			local ok, encrypted = pcall(EncryptPassword, string.sub(stored, 2));
 			if ( ok and encrypted ) then
 				stored = encrypted;
@@ -368,9 +443,9 @@ local function ComfyCharDraw()
 	for slot, id in ipairs(map) do
 		local text = ComfyChar.text[id];
 		local base = "CharSelectCharacterButton" .. slot .. "ButtonText";
-		_G[base .. "Name"]:SetText(text[1]);
-		_G[base .. "Info"]:SetText(text[2]);
-		_G[base .. "Location"]:SetText(text[3]);
+		getglobal(base .. "Name"):SetText(text[1]);
+		getglobal(base .. "Info"):SetText(text[2]);
+		getglobal(base .. "Location"):SetText(text[3]);
 	end
 	UpdateCharacterSelection();
 end
@@ -409,7 +484,7 @@ local function ComfyCharApply(autoEnter)
 	local byName = {};
 	for id = 1, count do
 		local base = "CharSelectCharacterButton" .. id .. "ButtonText";
-		ComfyChar.text[id] = { _G[base .. "Name"]:GetText(), _G[base .. "Info"]:GetText(), _G[base .. "Location"]:GetText() };
+		ComfyChar.text[id] = { getglobal(base .. "Name"):GetText(), getglobal(base .. "Info"):GetText(), getglobal(base .. "Location"):GetText() };
 		ComfyChar.names[id] = GetCharacterInfo(id);
 		if ( ComfyChar.names[id] ) then
 			byName[ComfyChar.names[id]] = id;
@@ -480,7 +555,7 @@ end
 local function ComfyCharArrows()
 	local count = ComfyChar.map and table.getn(ComfyChar.map) or 0;
 	for slot = 1, MAX_CHARACTERS_DISPLAYED do
-		local button = _G["CharSelectCharacterButton" .. slot];
+		local button = getglobal("CharSelectCharacterButton" .. slot);
 		if ( button and button.comfyUp ) then
 			local here = slot == ComfyChar.hover and count > 1 and not ComfyAccOff();
 			if ( here and slot > 1 ) then button.comfyUp:Show(); else button.comfyUp:Hide(); end
@@ -580,23 +655,37 @@ end
 ---------------------------------------------------------------------------
 
 function ComfyAccounts_OnLoad()
-	if ( ImportFile and ExportFile ) then
+	if ( ComfyAccStore() ) then
 		ComfyAccLoad();
+		ComfyAccEncryptAll();
 	end
 
 	-- Whatever is in the boxes is what logs in, so a password changed after
-	-- a click is the one saved. An empty password box on an account whose
-	-- password Nampower encrypted sends the stored one.
+	-- a click is the one saved. An empty password box on an account with an
+	-- encrypted password sends the stored one.
 	local login = AccountLogin_Login;
 	AccountLogin_Login = function()
 		if ( not ComfyAccOff() ) then
 			local name = AccountLoginAccountEdit:GetText();
 			local password = AccountLoginPasswordEdit:GetText();
+			-- The placeholder is never sent: it means the stored password,
+			-- and with none that works, the stock login asks for one.
+			if ( password == COMFY_ACC_SAVED ) then
+				password = "";
+				AccountLoginPasswordEdit:SetText("");
+			end
 			ComfyAcc.current = name;
 			ComfyAcc.pending = nil;
 			ComfyAcc.autoEnter = true;
 			local i = ComfyAccFind(name);
 			local stored = i and ComfyAccData.accounts[i].password or "";
+			-- A password that does not decrypt here falls through to the
+			-- stock login, which asks for one.
+			if ( password == "" and ComfyLoginServerLogin and string.find(stored, "^:comfy:")
+					and ComfyLoginServerLogin(name, stored) ) then
+				PlaySound("gsLogin");
+				return;
+			end
 			if ( password == "" and EncryptedServerLogin and string.find(stored, "^:encrypted:") ) then
 				PlaySound("gsLogin");
 				EncryptedServerLogin(name, stored);
@@ -646,6 +735,11 @@ function ComfyAccounts_OnLoad()
 		if ( ComfyAccData and not ComfyAccOff() ) then
 			ComfyAcc.selected = ComfyAccFind(this:GetText());
 			ComfyAccGlowAll();
+			-- The placeholder stands for one account's password only.
+			if ( AccountLoginPasswordEdit:GetText() == COMFY_ACC_SAVED
+					and string.upper(this:GetText()) ~= string.upper(ComfyAcc.savedFor or "") ) then
+				AccountLoginPasswordEdit:SetText("");
+			end
 		end
 	end);
 
@@ -672,11 +766,11 @@ function ComfyAccounts_OnLoad()
 			return;
 		end
 		for i = 1, MAX_CHARACTERS_DISPLAYED do
-			_G["CharSelectCharacterButton" .. i]:UnlockHighlight();
+			getglobal("CharSelectCharacterButton" .. i):UnlockHighlight();
 		end
 		local slot = ComfyChar.slot[CharacterSelect.selectedIndex];
 		if ( slot ) then
-			_G["CharSelectCharacterButton" .. slot]:LockHighlight();
+			getglobal("CharSelectCharacterButton" .. slot):LockHighlight();
 		end
 		ComfyCharArrows();
 		ComfyAutoUpdate();
@@ -741,7 +835,7 @@ function ComfyAccounts_OnLoad()
 	end
 
 	for slot = 1, MAX_CHARACTERS_DISPLAYED do
-		local button = _G["CharSelectCharacterButton" .. slot];
+		local button = getglobal("CharSelectCharacterButton" .. slot);
 		if ( button ) then
 			button.comfyUp = ComfyCharMakeArrow(button, -1);
 			button.comfyDown = ComfyCharMakeArrow(button, 1);
