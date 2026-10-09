@@ -56,8 +56,11 @@ if (zip) {
     const target = path.join(__dirname, 'comfylogin.zip');
     fs.rmSync(target, { force: true });
     // Windows' own tar is bsdtar, which writes zip. Git's tar is GNU tar, which does not.
+    // Stored, not compressed: the ComfyCraft launcher fetches patch-W.mpq from this zip as a byte
+    // range (launcher/lists/packages.json). An MPQ is compressed already, so storing costs little.
     const tar = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
-    execFileSync(tar, ['-a', '-c', '-f', target, '-C', root, 'comfylogin.dll', 'Data/patch-W.mpq'], { stdio: 'inherit' });
+    execFileSync(tar, ['-a', '-c', '-f', target, '--options', 'zip:compression=store', '-C', root,
+        'comfylogin.dll', 'Data/patch-W.mpq'], { stdio: 'inherit' });
     fs.rmSync(root, { recursive: true, force: true });
     console.log('wrote ' + target);
 }
