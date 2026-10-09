@@ -20,13 +20,12 @@ Each login that works is added to the list. The x on a row removes it.
 
 It needs [VanillaFixes](https://github.com/hannesmann/vanillafixes), which loads the DLL. Turtle WoW and OctoWoW come with it: look for `VanillaFixes.exe` and `dlls.txt` in the client folder.
 
-1. Download `patch-W.mpq` and `comfylogin.dll` from [Releases](https://github.com/aloofbit/comfylogin/releases/latest).
+1. Download `comfylogin.zip` from [Releases](https://github.com/aloofbit/comfylogin/releases/latest).
 2. Close the game.
-3. Copy `patch-W.mpq` to the client's `Data` folder.
-4. Copy `comfylogin.dll` to the client folder.
-5. Add the line `comfylogin.dll` to `dlls.txt` in the client folder.
-6. Start the game with `VanillaFixes.exe`. It asks once to load the DLLs in `dlls.txt`. Click **OK**.
-7. Log in. The account is added to the list.
+3. Extract the zip into the client folder, the folder with `WoW.exe`. This puts `comfylogin.dll` in the client folder and `patch-W.mpq` in its `Data` folder.
+4. Add the line `comfylogin.dll` to `dlls.txt` in the client folder.
+5. Start the game with `VanillaFixes.exe`. It asks once to load the DLLs in `dlls.txt`. Click **OK**.
+6. Log in. The account is added to the list.
 
 ## Passwords
 
@@ -41,7 +40,7 @@ A password saved on another PC or by another Windows user does not decrypt. The 
 
 ## Other autologin patches
 
-comfylogin reads accounts saved by [paokkerkir/vanilla-autologin](https://github.com/paokkerkir/vanilla-autologin) from `Imports\logins.txt` when `WTF\comfylogin.txt` does not exist yet. It does not change `Imports\logins.txt`, and that file keeps its passwords in plain text. Delete it when you no longer use the other patch.
+comfylogin does not read the accounts that [paokkerkir/vanilla-autologin](https://github.com/paokkerkir/vanilla-autologin) saved in `Imports\logins.txt`. Log in to each account once to add it to the list. `Imports\logins.txt` keeps its passwords in plain text. Delete it when you no longer use the other patch.
 
 Use one autologin patch. comfylogin turns itself off when it finds another.
 

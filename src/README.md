@@ -39,25 +39,24 @@ Letter W is not used by any pack that the ComfyCraft launcher lists, or by eithe
 
 ## Where the list is kept
 
-With `comfylogin.dll`, the list is in `WTF\comfylogin.txt`, through `ComfyLoginRead` and `ComfyLoginWrite`. Without it, the list is in `Imports\logins.txt`, through Nampower's `ImportFile` and `ExportFile`. The Lua uses the DLL's functions when they exist.
+The list is in `WTF\comfylogin.txt`, through the DLL's `ComfyLoginRead` and `ComfyLoginWrite`.
 
 The format is paokkerkir's: a Lua table, read back with `loadstring` in an empty environment. comfylogin keeps any key it does not know. A file that does not parse is never written over. `ComfyLoginRead` returns `false` for a file that exists but cannot be read, and the Lua treats that the same way.
 
-When `WTF\comfylogin.txt` does not exist, `ComfyLoginRead` returns `Imports\logins.txt`. At load, the Lua encrypts each password kept as text and saves, so the first start with the DLL writes `WTF\comfylogin.txt`. `Imports\logins.txt` is not changed.
+comfylogin does not read `Imports\logins.txt` (Nampower's `ImportFile`, and paokkerkir's list). Up to v0.2.0-alpha it did, and on 2026-10-08 an old file there left the login screen black. The owner dropped the import instead of finding the cause.
 
 The login screen has no other place to keep data. It has no `GetCVar`, `SetCVar` or `RegisterCVar`. The only saved string is the saved account name, in `Config.wtf`. The client reads each `Config.wtf` line into a 127-byte buffer, so the value can be about 109 characters. A 187-character value came back as 110 characters, with no closing quote. That is room for about four accounts and no character order.
 
-With neither the DLL nor Nampower, the list stays hidden, and the login screen is the stock screen.
+Without the DLL, the list stays hidden, and the login screen is the stock screen.
 
 ## Passwords
 
-A password is stored in one of three forms:
+A password is stored in one of two forms:
 
 | Form | Written by | Logged in with |
 |---|---|---|
-| `:` and the password | the Lua, with no encryption available | the stock login, with the `:` removed |
+| `:` and the password | the Lua, when `ComfyLoginEncrypt` fails | the stock login, with the `:` removed |
 | `:comfy:` and base64 DPAPI | `ComfyLoginEncrypt` | `ComfyLoginServerLogin` |
-| `:encrypted:` and base64 DPAPI | Nampower's `EncryptPassword`, with `WOW_ENCRYPTION_KEY` | Nampower's `EncryptedServerLogin` |
 
 `ComfyLoginEncrypt` calls `CryptProtectData` with user scope and the fixed entropy `comfylogin`. The entropy is not a secret: it keeps these blobs apart from other programs' DPAPI blobs. `ComfyLoginServerLogin` decrypts in C and calls the client's login function, so a decrypted password never reaches Lua. `ComfyLoginCanDecrypt` tells the Lua whether a stored password decrypts here, without returning it.
 
@@ -82,7 +81,16 @@ All addresses were read in the stock exe and compared with the `octow`, `octow -
 
 The Turtle and OctoWoW exes have the patched bytes. A PowerShell script on the forums makes the same change to the file. The DLL changes memory only, so `WoW.exe` stays the stock file.
 
-**2. The pointer check.** Before the Lua VM calls a C function, it runs `mov ecx, esi; call 0x42A320` at `0x6F5DE6`. `0x42A320` raises `Invalid function pointer` for an address outside a range in WoW.exe, so a function in a DLL fails when Lua calls it, not when it is registered. The five bytes of the call become `90`. The call has no stack arguments, and `eax` is not read after it. Nampower hooks `0x42A320` itself, and Turtle changed that function's body, so the call site is the place that is the same in every exe.
+**2. The pointer check.** The Lua VM calls a C function from two places. Before each call it loads the function into `ecx` and calls `0x42A320`. That function closes the client with `Invalid function pointer` for an address outside a range in WoW.exe, so a function in a DLL fails when Lua calls it, not when it is registered. The five bytes of each call become `90`. The calls have no stack arguments, and `eax` is not read after them. Nampower hooks `0x42A320` itself, and Turtle changed that function's body, so the call sites are the places that are the same in every exe. The DLL patches both sites or neither.
+
+| Address | Stock | Patched |
+|---|---|---|
+| `0x6F5DE6` | `8B CE E8 33 45 D3 FF` (`mov ecx, esi; call 0x42A320`) | `8B CE 90 90 90 90 90` |
+| `0x6F619F` | `8B CF E8 7A 41 D3 FF` (`mov ecx, edi; call 0x42A320`) | `8B CF 90 90 90 90 90` |
+
+`0x42A320` has three more callers: `0x6F601B` (the Lua debug hook) and `0x63CE8F` and `0x63DF6B` (frame code). None of them calls a function that comfylogin registers.
+
+**v0.2.0-alpha patched only `0x6F5DE6`.** It closed a client that had no Nampower. Nampower's hook on `0x42A320` passed every address, so the second site did not show in a test with Nampower loaded. The bytes at both sites are the same in the stock, `octow`, `octow - Copy`, `twow-hd` and `uninitialized-client` exes (checked 2026-10-08).
 
 **3. The login screen's functions.** `0x46A7B0` builds a new Lua state each time the login screen opens, then at `0x46A880` calls `0x46ABB0`, which registers the client's glue functions (Nampower's `Glue_LoadScriptFunctions`). The DLL changes that call's target to its own function, which makes the same call and then registers five functions with `FrameScript_RegisterFunction` (`0x704120`, `__fastcall(name, fn)`). It patches the call site and not the head of `0x46ABB0`: Nampower hooks the head, and the Turtle exes have a `jmp` into their own code at `0x46ABC4`.
 
@@ -100,7 +108,7 @@ The Lua VM calls a C function as `__fastcall(L)`: `mov ecx, edi; call esi` at `0
 
 The DLL checks the first bytes of each before it registers anything.
 
-**Checked on 2026-10-07 in clean-vanilla** (stock exe, Nampower 2.2 with no `ImportFile`, `comfylogin.dll` first in `dlls.txt`): the log shows all three patches, the panel shows, and the first start wrote `WTF\comfylogin.txt` from `Imports\logins.txt` with every password in the `:comfy:` form. `ProtectedData.Unprotect` in PowerShell, with the entropy `comfylogin`, decrypts each one.
+**Checked on 2026-10-07 in clean-vanilla** (stock exe, Nampower 2.2 with no `ImportFile`, `comfylogin.dll` first in `dlls.txt`): the log shows all three patches, the panel shows, and every saved password was in the `:comfy:` form. `ProtectedData.Unprotect` in PowerShell, with the entropy `comfylogin`, decrypts each one.
 
 ## Traps
 

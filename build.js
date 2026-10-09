@@ -2,6 +2,11 @@
  * build.js: pack src/ into patch-W.mpq, the patch a client installs.
  *
  *   node build.js [-o <out.mpq>]
+ *   node build.js --zip
+ *
+ * --zip also writes comfylogin.zip, the release download. It holds
+ * comfylogin.dll and Data\patch-W.mpq, so it extracts into a client folder as
+ * it is. Build comfylogin.dll with CMake first.
  *
  * Four files go in, all under Interface\GlueXML:
  *
@@ -23,6 +28,7 @@ const { execFileSync } = require('child_process');
 const args = process.argv.slice(2);
 const i = args.indexOf('-o');
 const out = path.resolve(i < 0 ? path.join(__dirname, 'patch-W.mpq') : args[i + 1]);
+const zip = args.includes('--zip');
 
 // The client reads glue files as they are, so each one goes in with CRLF
 // endings, the way Blizzard's own are.
@@ -36,3 +42,22 @@ for (const name of ['MovieFrame.xml', 'ComfyLoginPanel.xml', 'ComfyLogin.lua', '
 }
 execFileSync(process.execPath, packArgs, { stdio: 'inherit' });
 fs.rmSync(stage, { recursive: true, force: true });
+
+if (zip) {
+    const dll = path.join(__dirname, 'comfylogin.dll');
+    if (!fs.existsSync(dll)) {
+        console.error('no comfylogin.dll: build it with CMake first');
+        process.exit(1);
+    }
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'comfylogin-zip-'));
+    fs.mkdirSync(path.join(root, 'Data'));
+    fs.copyFileSync(dll, path.join(root, 'comfylogin.dll'));
+    fs.copyFileSync(out, path.join(root, 'Data', 'patch-W.mpq'));
+    const target = path.join(__dirname, 'comfylogin.zip');
+    fs.rmSync(target, { force: true });
+    // Windows' own tar is bsdtar, which writes zip. Git's tar is GNU tar, which does not.
+    const tar = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
+    execFileSync(tar, ['-a', '-c', '-f', target, '-C', root, 'comfylogin.dll', 'Data/patch-W.mpq'], { stdio: 'inherit' });
+    fs.rmSync(root, { recursive: true, force: true });
+    console.log('wrote ' + target);
+}

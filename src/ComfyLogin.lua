@@ -2,16 +2,15 @@
 -- characters on character select, with an auto login character. The frames
 -- are ComfyLoginPanel.xml, which loads this file. Written after
 -- paokkerkir/vanilla-autologin (itself after Haaxor1689/vanilla-autologin and
--- Otari98/Reorder-Patch), whose file it reads and writes, so accounts saved
--- with it carry over.
+-- Otari98/Reorder-Patch), whose file format it uses.
 --
--- THE LIST NEEDS A DLL. comfylogin.dll keeps it in WTF\comfylogin.txt, through
--- ComfyLoginRead and ComfyLoginWrite, and encrypts each password with DPAPI.
--- Without it, Nampower's ImportFile and ExportFile keep it in
--- Imports\logins.txt. The only glue storage with neither is the saved account
--- name in Config.wtf, and the client reads each Config.wtf line into 127
--- bytes, which leaves about 109 characters (measured 2026-09-25). With no DLL
--- the panel stays hidden and the login screen is stock.
+-- THE LIST NEEDS comfylogin.dll. It keeps the list in WTF\comfylogin.txt,
+-- through ComfyLoginRead and ComfyLoginWrite, and encrypts each password with
+-- DPAPI. The only glue storage without a DLL is the saved account name in
+-- Config.wtf, and the client reads each Config.wtf line into 127 bytes, which
+-- leaves about 109 characters (measured 2026-09-25). With no DLL the panel
+-- stays hidden and the login screen is stock. Nampower's Imports\logins.txt is
+-- not read: with an old one there, the login screen stayed black (2026-10-08).
 --
 -- IT STANDS DOWN FOR ANOTHER AUTOLOGIN. paokkerkir's defines LoginManager and
 -- the older one defines Autologin_Table. Both wrap the same functions, and
@@ -23,9 +22,8 @@ local COMFY_ACC_ROW = 40;
 local COMFY_ACC_GAP = 12;
 local ComfyAccData;
 
--- comfylogin.dll's functions, or else Nampower's.
 local function ComfyAccStore()
-	return ComfyLoginRead ~= nil or ( ImportFile ~= nil and ExportFile ~= nil );
+	return ComfyLoginRead ~= nil and ComfyLoginWrite ~= nil;
 end
 
 local function ComfyAccOff()
@@ -62,12 +60,7 @@ end
 local function ComfyAccLoad()
 	ComfyAccData = { accounts = {} };
 	ComfyAcc.broken = nil;
-	local ok, text;
-	if ( ComfyLoginRead ) then
-		ok, text = pcall(ComfyLoginRead);
-	else
-		ok, text = pcall(ImportFile, "logins");
-	end
+	local ok, text = pcall(ComfyLoginRead);
 	if ( not ok or text == false ) then
 		ComfyAcc.broken = true;
 		return;
@@ -97,16 +90,11 @@ local function ComfyAccSave()
 	if ( ComfyAcc.broken or not ComfyAccData ) then
 		return;
 	end
-	local text = ComfyAccSerialize(ComfyAccData, "");
-	if ( ComfyLoginWrite ) then
-		pcall(ComfyLoginWrite, text);
-	else
-		pcall(ExportFile, "logins", text);
-	end
+	pcall(ComfyLoginWrite, ComfyAccSerialize(ComfyAccData, ""));
 end
 
--- With comfylogin.dll, a password kept as text (a ":" and the password, from
--- an older comfylogin or from paokkerkir's autologin) is encrypted at load.
+-- A password kept as text (a ":" and the password, saved when encryption
+-- failed) is encrypted at load.
 local function ComfyAccEncryptAll()
 	if ( not ComfyLoginEncrypt or ComfyAcc.broken ) then
 		return;
@@ -115,7 +103,7 @@ local function ComfyAccEncryptAll()
 	for _, acct in ipairs(ComfyAccData.accounts) do
 		local stored = acct.password;
 		if ( type(stored) == "string" and string.len(stored) > 1 and string.sub(stored, 1, 1) == ":"
-				and not string.find(stored, "^:comfy:") and not string.find(stored, "^:encrypted:") ) then
+				and not string.find(stored, "^:comfy:") ) then
 			local ok, encrypted = pcall(ComfyLoginEncrypt, string.sub(stored, 2));
 			if ( ok and encrypted ) then
 				acct.password = encrypted;
@@ -326,9 +314,6 @@ function ComfyAccounts_Select(index)
 	if ( string.find(stored, "^:comfy:") ) then
 		usable = ComfyLoginCanDecrypt ~= nil and ComfyLoginCanDecrypt(stored);
 		AccountLoginPasswordEdit:SetText(usable and COMFY_ACC_SAVED or "");
-	elseif ( string.find(stored, "^:encrypted:") ) then
-		usable = EncryptedServerLogin ~= nil;
-		AccountLoginPasswordEdit:SetText(usable and COMFY_ACC_SAVED or "");
 	else
 		AccountLoginPasswordEdit:SetText(string.sub(stored, 2));
 		usable = string.len(stored) > 1;
@@ -386,11 +371,6 @@ local function ComfyAccCommit()
 		local stored = pending.password;
 		if ( ComfyLoginEncrypt ) then
 			local ok, encrypted = pcall(ComfyLoginEncrypt, string.sub(stored, 2));
-			if ( ok and encrypted ) then
-				stored = encrypted;
-			end
-		elseif ( ComfyAccData.encrypt_passwords and EncryptPassword ) then
-			local ok, encrypted = pcall(EncryptPassword, string.sub(stored, 2));
 			if ( ok and encrypted ) then
 				stored = encrypted;
 			end
@@ -684,11 +664,6 @@ function ComfyAccounts_OnLoad()
 			if ( password == "" and ComfyLoginServerLogin and string.find(stored, "^:comfy:")
 					and ComfyLoginServerLogin(name, stored) ) then
 				PlaySound("gsLogin");
-				return;
-			end
-			if ( password == "" and EncryptedServerLogin and string.find(stored, "^:encrypted:") ) then
-				PlaySound("gsLogin");
-				EncryptedServerLogin(name, stored);
 				return;
 			end
 			if ( name ~= "" and password ~= "" ) then

@@ -143,26 +143,53 @@ namespace
     // ---------------------------------------------------------------------------------------------
     // 2. C functions on the login screen
 
-    // The Lua VM, before it calls a C function: mov ecx, esi (the function); call 0x42A320. That
-    // function raises "Invalid function pointer" for an address outside WoW.exe. The call becomes five
-    // NOPs: it has no stack arguments, and eax is not read after it. Nampower hooks 0x42A320 itself, and
-    // Turtle changed its body, so the call site is the one place that is the same in every exe.
-    const uintptr_t     kCheckCall = 0x6F5DE6;
-    const unsigned char kCheckStock[] = { 0x8B, 0xCE, 0xE8, 0x33, 0x45, 0xD3, 0xFF };
-    const unsigned char kCheckOff[]   = { 0x8B, 0xCE, 0x90, 0x90, 0x90, 0x90, 0x90 };
+    // The Lua VM calls a C function from two places. Before each call it loads the function into ecx
+    // and calls 0x42A320, which closes the client with "Invalid function pointer" for an address outside
+    // WoW.exe. Each call becomes five NOPs: it has no stack arguments, and eax is not read after it.
+    // Nampower hooks 0x42A320 itself, and Turtle changed its body, so the call sites are the places that
+    // are the same in every exe. With Nampower loaded, its hook passed our functions at the second site,
+    // so a missed site showed only without Nampower.
+    struct CheckSite
+    {
+        uintptr_t     addr;
+        unsigned char stock[7];
+    };
 
+    const CheckSite kChecks[] = {
+        { 0x6F5DE6, { 0x8B, 0xCE, 0xE8, 0x33, 0x45, 0xD3, 0xFF } },   // mov ecx, esi; call 0x42A320
+        { 0x6F619F, { 0x8B, 0xCF, 0xE8, 0x7A, 0x41, 0xD3, 0xFF } },   // mov ecx, edi; call 0x42A320
+    };
+    const unsigned char kNops[5] = { 0x90, 0x90, 0x90, 0x90, 0x90 };
+
+    // Both sites or neither: with one left on, the first call through it closes the client.
     bool PointerCheckOff()
     {
-        if (Same(kCheckCall, kCheckOff, sizeof(kCheckOff)))
+        int stock = 0, off = 0;
+        for (const CheckSite& c : kChecks)
+        {
+            if (Same(c.addr, c.stock, sizeof(c.stock)))
+                ++stock;
+            else if (Same(c.addr, c.stock, 2) && Same(c.addr + 2, kNops, sizeof(kNops)))
+                ++off;
+        }
+        const int n = static_cast<int>(sizeof(kChecks) / sizeof(kChecks[0]));
+        if (off == n)
         {
             Log("pointer check: already off");
             return true;
         }
-        if (!Same(kCheckCall, kCheckStock, sizeof(kCheckStock)) ||
-            !Patch(kCheckCall + 2, kCheckOff + 2, 5))
+        if (stock + off != n)
         {
-            Log("pointer check: unknown bytes at 0x6F5DE6, left alone");
+            Log("pointer check: unknown bytes, left alone (%d stock, %d off)", stock, off);
             return false;
+        }
+        for (const CheckSite& c : kChecks)
+        {
+            if (Same(c.addr, c.stock, sizeof(c.stock)) && !Patch(c.addr + 2, kNops, sizeof(kNops)))
+            {
+                Log("pointer check: VirtualProtect failed at 0x%08X", static_cast<unsigned>(c.addr));
+                return false;
+            }
         }
         Log("pointer check: turned off");
         return true;
@@ -229,7 +256,6 @@ namespace
     // The file
 
     const wchar_t kListFile[] = L"WTF\\comfylogin.txt";
-    const wchar_t kOldFile[]  = L"Imports\\logins.txt";   // Nampower's, and paokkerkir's autologin's
     const DWORD   kMaxFile    = 4 * 1024 * 1024;
 
     std::wstring PathOf(const wchar_t* rel) { return std::wstring(g_dir) + rel; }
@@ -278,23 +304,18 @@ namespace
     }
 
     // ComfyLoginRead(): the list as text; nil when there is none; false when the file is there but
-    // cannot be read, so that the Lua never writes over it. With no WTF\comfylogin.txt yet, it reads
-    // Imports\logins.txt, and the first save moves the accounts to WTF.
+    // cannot be read, so that the Lua never writes over it. Imports\logins.txt (Nampower's, and
+    // paokkerkir's autologin's) is not read: with an old one there, the login screen stayed black.
     int __fastcall Lua_Read(void* L)
     {
         std::string text;
         const std::wstring list = PathOf(kListFile);
-        if (Exists(list))
-        {
-            if (ReadText(list, text))
-                PushString(L, text.c_str());
-            else
-                PushBoolean(L, false);
-        }
-        else if (ReadText(PathOf(kOldFile), text))
+        if (!Exists(list))
+            PushNil(L);
+        else if (ReadText(list, text))
             PushString(L, text.c_str());
         else
-            PushNil(L);
+            PushBoolean(L, false);
         return 1;
     }
 
