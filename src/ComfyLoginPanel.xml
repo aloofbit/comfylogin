@@ -150,6 +150,48 @@
 		<CheckedTexture file="Interface\Buttons\UI-CheckBox-Check"/>
 		<DisabledCheckedTexture file="Interface\Buttons\UI-CheckBox-Check-Disabled"/>
 	</CheckButton>
+	<!-- Shown when the list cannot be saved: in the panel's corner, or under
+	     the panel when it shows. Before ComfyAccounts, so that it exists when
+	     ComfyAccounts_OnLoad runs. -->
+	<Frame name="ComfyAccountsError" parent="AccountLoginUI" hidden="true">
+		<Size>
+			<AbsDimension x="248" y="60"/>
+		</Size>
+		<Anchors>
+			<Anchor point="TOPRIGHT">
+				<Offset>
+					<AbsDimension x="-10" y="-15"/>
+				</Offset>
+			</Anchor>
+		</Anchors>
+		<Backdrop bgFile="Interface\DialogFrame\UI-DialogBox-Background" edgeFile="Interface\DialogFrame\UI-DialogBox-Border" tile="true">
+			<BackgroundInsets>
+				<AbsInset left="11" right="12" top="12" bottom="11"/>
+			</BackgroundInsets>
+			<TileSize>
+				<AbsValue val="32"/>
+			</TileSize>
+			<EdgeSize>
+				<AbsValue val="32"/>
+			</EdgeSize>
+		</Backdrop>
+		<Layers>
+			<Layer level="ARTWORK">
+				<FontString name="ComfyAccountsErrorText" inherits="GlueFontRedSmall" justifyH="LEFT">
+					<Size>
+						<AbsDimension x="208" y="0"/>
+					</Size>
+					<Anchors>
+						<Anchor point="TOPLEFT">
+							<Offset>
+								<AbsDimension x="20" y="-20"/>
+							</Offset>
+						</Anchor>
+					</Anchors>
+				</FontString>
+			</Layer>
+		</Layers>
+	</Frame>
 	<Frame name="ComfyAccounts" parent="AccountLoginUI" hidden="true">
 		<Size>
 			<AbsDimension x="248" y="100"/>

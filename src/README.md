@@ -58,7 +58,7 @@ A password is stored in one of two forms:
 | `:` and the password | the Lua, when `ComfyLoginEncrypt` fails | the stock login, with the `:` removed |
 | `:comfy:` and base64 DPAPI | `ComfyLoginEncrypt` | `ComfyLoginServerLogin` |
 
-`ComfyLoginEncrypt` calls `CryptProtectData` with user scope and the fixed entropy `comfylogin`. The entropy is not a secret: it keeps these blobs apart from other programs' DPAPI blobs. `ComfyLoginServerLogin` decrypts in C and calls the client's login function, so a decrypted password never reaches Lua. `ComfyLoginCanDecrypt` tells the Lua whether a stored password decrypts here, without returning it.
+`ComfyLoginEncrypt` calls `CryptProtectData` with user scope and the fixed entropy `comfylogin`. The entropy is not a secret: it keeps these blobs apart from other programs' DPAPI blobs. `ComfyLoginServerLogin` decrypts in C and calls the client's login function, so a decrypted password never reaches Lua. A typed password is encrypted first and logs in the same way. `ComfyLoginCanDecrypt` tells the Lua whether a stored password decrypts here, without returning it.
 
 A click on an account with an encrypted password puts `COMFY_ACC_SAVED` (`~comfy~saved~`) in the password box, which shows it as asterisks. The Login wrap never sends it: it sends the stored password instead. A change to the account name clears it, so it never logs in another account.
 
@@ -66,7 +66,9 @@ A click on an account with an encrypted password puts `COMFY_ACC_SAVED` (`~comfy
 
 ## comfylogin.dll
 
-The DLL makes three patches at `DLL_PROCESS_ATTACH`. Each is made only when the stock bytes are found. Otherwise the DLL logs to `comfylogin.log`, next to the DLL, and leaves that part alone.
+The DLL makes three patches at `DLL_PROCESS_ATTACH`. Each is made only when the stock bytes are found. Otherwise the DLL logs to `Logs\comfylogin.log` and leaves that part alone. Before the patches, it writes and deletes `WTF\comfylogin.probe` and logs whether `WTF` can be written, and whether `WTF\comfylogin.txt` is read-only.
+
+`ComfyLoginCheckWrite` makes the same test each time the login screen loads. When it finds a problem, or when a save fails, `ComfyAccountsError` shows the reason in red in the panel's corner. When the panel shows, the error box goes under it.
 
 All addresses were read in the stock exe and compared with the `octow`, `octow - Copy` and `twow-hd` exes on 2026-10-07 (capstone disassembly). The bytes are the same in all four, except where a row says otherwise. Nampower's names come from `offsets.hpp` in github.com/Emyrk/nampower.
 
@@ -92,7 +94,7 @@ The Turtle and OctoWoW exes have the patched bytes. A PowerShell script on the f
 
 **v0.2.0-alpha patched only `0x6F5DE6`.** It closed a client that had no Nampower. Nampower's hook on `0x42A320` passed every address, so the second site did not show in a test with Nampower loaded. The bytes at both sites are the same in the stock, `octow`, `octow - Copy`, `twow-hd` and `uninitialized-client` exes (checked 2026-10-08).
 
-**3. The login screen's functions.** `0x46A7B0` builds a new Lua state each time the login screen opens, then at `0x46A880` calls `0x46ABB0`, which registers the client's glue functions (Nampower's `Glue_LoadScriptFunctions`). The DLL changes that call's target to its own function, which makes the same call and then registers five functions with `FrameScript_RegisterFunction` (`0x704120`, `__fastcall(name, fn)`). It patches the call site and not the head of `0x46ABB0`: Nampower hooks the head, and the Turtle exes have a `jmp` into their own code at `0x46ABC4`.
+**3. The login screen's functions.** `0x46A7B0` builds a new Lua state each time the login screen opens, then at `0x46A880` calls `0x46ABB0`, which registers the client's glue functions (Nampower's `Glue_LoadScriptFunctions`). The DLL changes that call's target to its own function, which makes the same call and then registers six functions with `FrameScript_RegisterFunction` (`0x704120`, `__fastcall(name, fn)`). It patches the call site and not the head of `0x46ABB0`: Nampower hooks the head, and the Turtle exes have a `jmp` into their own code at `0x46ABC4`.
 
 The Lua VM calls a C function as `__fastcall(L)`: `mov ecx, edi; call esi` at `0x6F5DF3`. It returns the number of results. The Lua API functions the DLL calls, all `__fastcall(L, ...)`:
 
@@ -112,7 +114,7 @@ The DLL checks the first bytes of each before it registers anything.
 
 ## Traps
 
-**The client clears the password string after a login.** It clears every copy of the string in memory (paokkerkir found this). comfylogin stores each password with a `:` in front, which makes a different string, and removes the `:` when it uses it.
+**The client clears the password string after a login.** `0x46AFB0` writes zeros over the string it gets, in place. Lua keeps one copy of each text, so every Lua value with the same text becomes zeros (paokkerkir found this). An account name or a character name that is the same as the password is cleared with it, and the next save writes the zeros to the file. comfylogin stores each password with a `:` in front, which makes a different string, and removes the `:` when it uses it. With the DLL, a typed password is encrypted and sent through `ComfyLoginServerLogin` too, so the client clears the DLL's copy and no Lua string. The stock login is used only when `ComfyLoginEncrypt` fails.
 
 **The stock login screen has no `_G`.** Turtle's has. On a stock client, `_G[name]` stopped the file at load with `attempt to index global '_G' (a nil value)`. comfylogin uses `getglobal(name)`, which Blizzard's own glue code uses and every 1.12 client has.
 

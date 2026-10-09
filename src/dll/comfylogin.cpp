@@ -5,8 +5,9 @@
 //    changed, and patch-W changes MovieFrame.xml. Turtle and OctoWoW clients ship with the check off.
 // 2. It lets the login screen call C functions. The Lua VM refuses a function outside WoW.exe, and the
 //    login screen gets a new Lua state each time it opens, so the functions are registered each time.
-// 3. It gives the login screen five functions: read and write WTF\comfylogin.txt, encrypt a password
-//    with DPAPI, test that one decrypts, and log in with one. A decrypted password never reaches Lua.
+// 3. It gives the login screen six functions: read and write WTF\comfylogin.txt, test that it can be
+//    written, encrypt a password with DPAPI, test that one decrypts, and log in with one. A decrypted
+//    password never reaches Lua.
 //
 // Each patch is made only where the stock bytes are found. Otherwise the DLL logs and leaves that part
 // alone. src/README.md has each address and how it was checked.
@@ -25,7 +26,7 @@
 namespace
 {
     wchar_t g_dir[MAX_PATH] = {};       // the client folder, with a trailing backslash
-    wchar_t g_logPath[MAX_PATH] = {};   // comfylogin.log, next to the DLL
+    wchar_t g_logPath[MAX_PATH] = {};   // Logs\comfylogin.log, in the client folder
 
     void Log(const char* fmt, ...)
     {
@@ -303,6 +304,49 @@ namespace
         return ok;
     }
 
+    // Can the list be written? Empty when it can, or else what stops it, for the log and the login
+    // screen. It writes a probe file, which is deleted when its handle closes.
+    std::string WriteProblem()
+    {
+        CreateDirectoryW(PathOf(L"WTF").c_str(), nullptr);
+        HANDLE h = CreateFileW(PathOf(L"WTF\\comfylogin.probe").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                               FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+        DWORD err = 0;
+        if (h == INVALID_HANDLE_VALUE)
+            err = GetLastError();
+        else
+        {
+            DWORD put = 0;
+            if (!WriteFile(h, "x", 1, &put, nullptr) || put != 1)
+                err = GetLastError();
+            CloseHandle(h);
+        }
+        char text[128] = {};
+        if (err != 0)
+            sprintf_s(text, "Cannot write to the WTF folder (Windows error %lu).", err);
+        else
+        {
+            const DWORD attr = GetFileAttributesW(PathOf(kListFile).c_str());
+            if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_READONLY))
+                sprintf_s(text, "WTF\\comfylogin.txt is read-only.");
+        }
+        return text;
+    }
+
+    // ComfyLoginCheckWrite(): nil when the list can be written, or else the problem as text.
+    int __fastcall Lua_CheckWrite(void* L)
+    {
+        const std::string problem = WriteProblem();
+        if (problem.empty())
+            PushNil(L);
+        else
+        {
+            Log("WTF: %s", problem.c_str());
+            PushString(L, problem.c_str());
+        }
+        return 1;
+    }
+
     // ComfyLoginRead(): the list as text; nil when there is none; false when the file is there but
     // cannot be read, so that the Lua never writes over it. Imports\logins.txt (Nampower's, and
     // paokkerkir's autologin's) is not read: with an old one there, the login screen stayed black.
@@ -475,6 +519,7 @@ namespace
         reg("ComfyLoginEncrypt", reinterpret_cast<void*>(&Lua_Encrypt));
         reg("ComfyLoginCanDecrypt", reinterpret_cast<void*>(&Lua_CanDecrypt));
         reg("ComfyLoginServerLogin", reinterpret_cast<void*>(&Lua_ServerLogin));
+        reg("ComfyLoginCheckWrite", reinterpret_cast<void*>(&Lua_CheckWrite));
     }
 
     bool HookGlue()
@@ -505,14 +550,14 @@ namespace
         return true;
     }
 
-    void Attach(HMODULE self)
+    void Attach()
     {
         GetModuleFileNameW(nullptr, g_dir, MAX_PATH);
         if (wchar_t* slash = wcsrchr(g_dir, L'\\'))
             slash[1] = 0;
-        GetModuleFileNameW(self, g_logPath, MAX_PATH);
-        if (wchar_t* dot = wcsrchr(g_logPath, L'.'))
-            wcscpy_s(dot, MAX_PATH - (dot - g_logPath), L".log");
+        // The client's own logs are in Logs. The client makes the folder, but later than this.
+        CreateDirectoryW(PathOf(L"Logs").c_str(), nullptr);
+        wcscpy_s(g_logPath, PathOf(L"Logs\\comfylogin.log").c_str());
 
         // One start per log: it is the first place to look when the panel does not show.
         FILE* f = nullptr;
@@ -520,6 +565,11 @@ namespace
             fclose(f);
         Log("comfylogin.dll loaded, client folder %ls", g_dir);
 
+        const std::string problem = WriteProblem();
+        if (problem.empty())
+            Log("WTF: writable");
+        else
+            Log("WTF: %s", problem.c_str());
         SignatureOff();
         if (!ApiMatches())
         {
@@ -536,7 +586,7 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID)
     if (reason == DLL_PROCESS_ATTACH)
     {
         DisableThreadLibraryCalls(module);
-        Attach(module);
+        Attach();
     }
     return TRUE;
 }

@@ -47,7 +47,7 @@ Use one autologin patch. comfylogin turns itself off when it finds another.
 ## Caveats
 
 - A server with an anti-cheat (Warden) can see DLLs in the client. Ask your server if client DLLs are allowed.
-- If the list does not show after a login that worked, look at `comfylogin.log` in the client folder.
+- If the list does not show after a login that worked, look at `Logs\comfylogin.log` in the client folder. It also says if comfylogin cannot write to the `WTF` folder.
 
 ## Thanks
 

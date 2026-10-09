@@ -86,11 +86,35 @@ local function ComfyAccLoad()
 	ComfyAccData = data;
 end
 
+-- What stops the list being saved, for ComfyAccountsError on the login screen.
+-- A failure on character select can be lost: a new glue Lua state starts
+-- empty, and only the test at load runs again.
+local COMFY_ACC_UNSAVED = "Accounts cannot be saved.\n";
+
 local function ComfyAccSave()
 	if ( ComfyAcc.broken or not ComfyAccData ) then
 		return;
 	end
-	pcall(ComfyLoginWrite, ComfyAccSerialize(ComfyAccData, ""));
+	local ok, saved = pcall(ComfyLoginWrite, ComfyAccSerialize(ComfyAccData, ""));
+	if ( ok and saved ) then
+		ComfyAcc.unsaved = nil;
+	else
+		ComfyAcc.unsaved = COMFY_ACC_UNSAVED .. "Writing WTF\\comfylogin.txt failed.";
+	end
+end
+
+-- The DLL writes a probe file in WTF. A DLL older than ComfyLoginCheckWrite
+-- has no test, and shows no error.
+local function ComfyAccCheckWrite()
+	if ( not ComfyLoginCheckWrite ) then
+		return;
+	end
+	local ok, problem = pcall(ComfyLoginCheckWrite);
+	if ( not ok ) then
+		ComfyAcc.unsaved = COMFY_ACC_UNSAVED .. tostring(problem);
+	elseif ( problem ) then
+		ComfyAcc.unsaved = COMFY_ACC_UNSAVED .. problem;
+	end
 end
 
 -- A password kept as text (a ":" and the password, saved when encryption
@@ -229,6 +253,25 @@ function ComfyAccounts_Hover(row, on)
 	ComfyAccGlowAll();
 end
 
+-- In the panel's corner, or under the panel and its pager when it shows.
+local function ComfyAccErrorUpdate()
+	if ( ComfyAccOff() or not ComfyAcc.unsaved ) then
+		ComfyAccountsError:Hide();
+		return;
+	end
+	ComfyAccountsErrorText:SetText(ComfyAcc.unsaved);
+	ComfyAccountsError:ClearAllPoints();
+	if ( not ComfyAccounts:IsShown() ) then
+		ComfyAccountsError:SetPoint("TOPRIGHT", "AccountLoginUI", "TOPRIGHT", -10, -15);
+	elseif ( ComfyAccountsNext:IsShown() ) then
+		ComfyAccountsError:SetPoint("TOPRIGHT", "ComfyAccounts", "BOTTOMRIGHT", 0, -30);
+	else
+		ComfyAccountsError:SetPoint("TOPRIGHT", "ComfyAccounts", "BOTTOMRIGHT", 0, 0);
+	end
+	ComfyAccountsError:SetHeight(ComfyAccountsErrorText:GetHeight() + 40);
+	ComfyAccountsError:Show();
+end
+
 function ComfyAccounts_Update()
 	local list = ComfyAccData and ComfyAccData.accounts;
 	local total = list and table.getn(list) or 0;
@@ -237,6 +280,7 @@ function ComfyAccounts_Update()
 		if ( AccountLoginSaveAccountName and not ComfyAccOff() ) then
 			AccountLoginSaveAccountName:Show();
 		end
+		ComfyAccErrorUpdate();
 		return;
 	end
 	-- Every login is saved, and the x on a row forgets it, so the stock
@@ -280,6 +324,7 @@ function ComfyAccounts_Update()
 	end
 	ComfyAccounts:SetHeight(20 + shown * COMFY_ACC_ROW + ( shown - 1 ) * COMFY_ACC_GAP + 20);
 	ComfyAccounts:Show();
+	ComfyAccErrorUpdate();
 end
 
 function ComfyAccounts_Page(step)
@@ -362,14 +407,15 @@ end
 --
 -- The client wipes the password string it logged in with from memory, every
 -- copy of it (paokkerkir found this). The stored form carries a ":" in front,
--- which makes it a different string, and the ":" is cut off at use.
+-- which makes it a different string, and the ":" is cut off at use. A login
+-- through the DLL is already in the ":comfy:" form.
 local function ComfyAccCommit()
 	local pending = ComfyAcc.pending;
 	ComfyAcc.pending = nil;
 	if ( pending ) then
 		local i = ComfyAccFind(pending.account);
 		local stored = pending.password;
-		if ( ComfyLoginEncrypt ) then
+		if ( ComfyLoginEncrypt and not string.find(stored, "^:comfy:") ) then
 			local ok, encrypted = pcall(ComfyLoginEncrypt, string.sub(stored, 2));
 			if ( ok and encrypted ) then
 				stored = encrypted;
@@ -637,6 +683,7 @@ end
 function ComfyAccounts_OnLoad()
 	if ( ComfyAccStore() ) then
 		ComfyAccLoad();
+		ComfyAccCheckWrite();
 		ComfyAccEncryptAll();
 	end
 
@@ -658,16 +705,29 @@ function ComfyAccounts_OnLoad()
 			ComfyAcc.pending = nil;
 			ComfyAcc.autoEnter = true;
 			local i = ComfyAccFind(name);
-			local stored = i and ComfyAccData.accounts[i].password or "";
+			local send = i and ComfyAccData.accounts[i].password or "";
+			-- A typed password is encrypted and sent through the DLL as well.
+			-- The stock login zeroes the Lua string it gets, and Lua keeps one
+			-- copy of each text, so an account or character name with the same
+			-- text was zeroed with it. ComfyLoginEncrypt returns a ":comfy:"
+			-- value unchanged, so a password typed in that form is not one.
+			if ( name ~= "" and password ~= "" ) then
+				local ok, encrypted = pcall(ComfyLoginEncrypt, password);
+				if ( ok and encrypted and not string.find(password, "^:comfy:") ) then
+					send = encrypted;
+					ComfyAcc.pending = { account = name, password = encrypted };
+				else
+					send = "";
+					ComfyAcc.pending = { account = name, password = ":" .. password };
+				end
+			end
 			-- A password that does not decrypt here falls through to the
 			-- stock login, which asks for one.
-			if ( password == "" and ComfyLoginServerLogin and string.find(stored, "^:comfy:")
-					and ComfyLoginServerLogin(name, stored) ) then
+			if ( ComfyLoginServerLogin and string.find(send, "^:comfy:")
+					and ComfyLoginServerLogin(name, send) ) then
 				PlaySound("gsLogin");
+				AccountLoginPasswordEdit:SetText("");
 				return;
-			end
-			if ( name ~= "" and password ~= "" ) then
-				ComfyAcc.pending = { account = name, password = ":" .. password };
 			end
 		end
 		login();
